@@ -76,6 +76,7 @@ var N={chats:['💬','Chats'],clients:['👤','Clients'],leads:['⭐','Leads'],f
 var TG={new:'New',lead:'Lead',client:'Client',follow:'Follow-up'},FS={waiting:'অপেক্ষায়',replied:'রিপ্লাই দিয়েছে',no_reply:'রিপ্লাই নেই'};
 var K={},L=[],LEADS=[],S=[],M=[],cur=null,view='chats',err='';
 var seen=(function(){try{return JSON.parse(localStorage.seen||'{}')}catch(e){return{}}})();
+var seenB=(function(){try{return JSON.parse(localStorage.seenBuf||'{}')}catch(e){return{}}})();
 var color=function(s){var h=0;for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))%360;return'hsl('+h+',55%,45%)'};
 var av=function(c,s){var t=(c.name||'#').replace(/[^\p{L}\p{N} ]/gu,'').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase()||'#';return'<div class="av" style="width:'+s+'px;height:'+s+'px;background:'+color(c.key)+';font-size:'+s/2.8+'px">'+E(t)+'</div>'};
 var tm=function(d){if(!d)return'';var x=new Date(d),n=new Date();return x.toDateString()==n.toDateString()?x.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):x.toLocaleDateString([],{day:'2-digit',month:'short'})};
@@ -91,16 +92,17 @@ async function load(){
  (R[0].data||[]).forEach(function(r){var c=ens(r.phone_number);if(!c)return;c.cid=r.id;c.name=r.customer_name||'';c.tag=r.tag||'new';c.fu=r.followup_count||0;c.fus=r.followup_status||'';c.fuq=r.followup_quality||''});
  (R[1].data||[]).forEach(function(r){var c=ens(r.phone);if(!c)return;c.ai_on=r.ai_on;c.sphone=r.phone});
  LEADS.forEach(function(r){var c=ens(r.phone_number);if(c&&c.tag=='new')c.tag='lead'});
- (R[4].data||[]).forEach(function(r){var c=ens(r.phone_number);if(!c)return;if(!c.time)c.time=r.created_at;if(!c.name&&r.Name)c.name=r.Name});
  (R[5].data||[]).forEach(function(r){var c=ens(r.session_id);if(!c)return;if(!c.sid)c.sid=r.session_id;if(!c.lastId){c.lastId=r.id;c.last=txt(r)}if(kind(r)=='in'&&r.id>(seen[c.key]||0))c.unread++});
- L=Object.keys(K).map(function(k){var c=K[k];if(!c.name)c.name=c.phone;return c}).sort(function(a,b){return b.lastId-a.lastId});
- if(cur&&K[cur]){var c=K[cur],ids=[c.sid||c.key,'+'+c.key,c.key];var m=await db.from('whatsapp_chat_history').select('id,session_id,message').in('session_id',ids).order('id');M=m.data||[]}
+ // AI রিপ্লাই করুক বা না করুক — wa_message_buffer-এ আসা প্রতিটা কাস্টমার মেসেজই ইনবক্সে দেখাবে
+ (R[4].data||[]).forEach(function(r){var c=ens(r.phone_number);if(!c)return;if(!c.time)c.time=r.created_at;if(!c.name&&r.Name)c.name=r.Name;if(r.processed===false){if(!c.buf)c.buf=[];if(!c.buf.length){c.last=r.message_text;c.time=r.created_at}c.buf.push(r);if(!seenB[r.id])c.unread++}});
+ L=Object.keys(K).map(function(k){var c=K[k];if(!c.name)c.name=c.phone;return c}).sort(function(a,b){var d=((b.buf&&b.buf.length)?1:0)-((a.buf&&a.buf.length)?1:0);if(d)return d;return b.lastId-a.lastId});
+ if(cur&&K[cur]){var c=K[cur],ids=[c.sid||c.key,'+'+c.key,c.key];var m=await db.from('whatsapp_chat_history').select('id,session_id,message').in('session_id',ids).order('id');M=m.data||[];(c.buf||[]).forEach(function(r){M.push({id:'buf'+r.id,session_id:c.sid||c.key,message:{type:'human',content:r.message_text}})})}
  draw()}
 function draw(){nv();list();win();({clients:pc,leads:pl,follow:pf,sales:ps,crm:pm,settings:pt}[view]||function(){})()}
 function nv(){var u=L.reduce(function(a,c){return a+c.unread},0);$('nv').innerHTML='<div class="lg">FU</div>'+Object.keys(N).map(function(k){return'<button class="nb '+(view==k?'on':'')+'" onclick="go(\''+k+'\')"><i>'+N[k][0]+'</i>'+N[k][1]+(k=='chats'&&u?'<b>'+u+'</b>':'')+'</button>'}).join('')}
 function go(v){view=v;document.querySelectorAll('.v').forEach(function(e){e.classList.toggle('on',e.id==v)});$('ti').textContent=N[v][1];draw()}
 function list(){var q=$('q').value.toLowerCase();$('its').innerHTML=L.filter(function(c){return c.name.toLowerCase().indexOf(q)>-1||c.key.indexOf(q)>-1}).map(function(c){return'<div class="it '+(c.key==cur?'on':'')+'" onclick="sel(\''+c.key+'\')">'+av(c,46)+'<div class="m"><div class="r"><b>'+E(c.name)+'</b><span class="t">'+tm(c.time)+'</span></div><div class="r"><span class="p">'+E(c.last)+'</span>'+(c.unread?'<span class="un">'+c.unread+'</span>':'')+'</div><div style="margin-top:4px"><span class="tg '+c.tag+'">'+TG[c.tag]+'</span> <span class="tg">'+(c.ai_on?'🤖 AI ON':'AI OFF')+'</span></div></div></div>'}).join('')}
-function sel(k){cur=k;var c=K[k];seen[k]=c.lastId;try{localStorage.seen=JSON.stringify(seen)}catch(e){}c.unread=0;M=[];$('chats').classList.add('open');load()}
+function sel(k){cur=k;var c=K[k];seen[k]=c.lastId;(c.buf||[]).forEach(function(r){seenB[r.id]=1});try{localStorage.seen=JSON.stringify(seen);localStorage.seenBuf=JSON.stringify(seenB)}catch(e){}c.unread=0;M=[];$('chats').classList.add('open');load()}
 var sig='';
 function win(){var c=K[cur];if(!c){$('w').innerHTML='<div class="ms" style="align-items:center;justify-content:center;color:var(--mu)">একটা চ্যাট সিলেক্ট করুন</div>';$('inf').innerHTML='';sig='';return}
  var s=cur+'|'+M.length+'|'+c.ai_on,old=$('mi')?$('mi').value:'';if(s==sig){inf();return}sig=s;
@@ -115,6 +117,8 @@ async function send(){if(!db){alert('আগে Settings থেকে Supabase �
  var r=await db.from('whatsapp_chat_history').insert({session_id:c.sid||c.key,message:{type:'ai',content:v,tool_calls:[],additional_kwargs:{by:'human'},response_metadata:{},invalid_tool_calls:[]}});
  if(r.error)alert('সেভ হয়নি: '+r.error.message);
  if(CFG.SEND_HOOK){try{await fetch(CFG.SEND_HOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:c.key,text:v})})}catch(e){alert('n8n webhook এ পাঠানো যায়নি')}}
+ // রিপ্লাই দিলে ওই চ্যাটের পড়ে থাকা মেসেজগুলো আর AI-এর জন্য অপেক্ষায় থাকবে না
+ if(c.buf&&c.buf.length){try{await db.from('wa_message_buffer').update({processed:true}).in('phone_number',[c.sid||c.key,c.phone,'+'+c.key,c.key])}catch(e){}}
  sig='';load()}
 var tbl=function(h,r){return'<div class="card tw"><table><tr>'+h.map(function(x){return'<th>'+x+'</th>'}).join('')+'</tr>'+r.join('')+'</table></div>'};
 var P=function(){return document.querySelector('#'+view+' .pg')};
